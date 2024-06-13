@@ -10,7 +10,7 @@ getwd()
 
 # load in the rki base network
 msn_base = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_allmetrics/geojsons/msn_base_all.geojson") %>%
-  select((1:10), population_change, (71:120)) %>%
+  select((1:10), per_business_density, per_civic_density, per_employment_density, per_business_independence_index, per_population_change) %>%
   filter(!is.na(per_population_change)) %>%
   st_transform(crs = 3347)
 
@@ -28,11 +28,15 @@ main_streets = main_streets %>%
 msn_base = msn_base %>%
   semi_join(st_drop_geometry(main_streets), by = "id")
 
-## Preprocessing the Housing Data ---------------------------------------------
+
+#--------------------------------------------------------------------------------------------------------------------------------------
+
+#### Processing the Housing Consturctuin Year Data ####
 
 # load in the housing data
-housing = read_csv("./Data/EA_DATA_EXPORT/DemosHousing.csv") %>%
-  select(Key, (4:12)) %>%
+setwd("~/cmhc-scaling")
+housing_year = read_csv("./Data/Housing_Data.csv") %>%
+  select(Key, (2:10)) %>%
   rename("DAUID" = Key) %>%
   mutate(DAUID = as.character(DAUID),
          built_pre1960 = ECYPOCP60,
@@ -41,7 +45,7 @@ housing = read_csv("./Data/EA_DATA_EXPORT/DemosHousing.csv") %>%
          built_01_23 = ECYPOC0105 + ECYPOC0610 + ECYPOC1115 + ECYPOC1621 + ECYPOC22P) %>%
   select(DAUID, (11:14))
 
-housing = housing %>%
+housing_year = housing_year %>%
   mutate(
     housing_total = built_pre1960 + built_61_80 + built_81_00 + built_01_23,
     per_pre1960 = built_pre1960 / housing_total * 100,
@@ -52,15 +56,63 @@ housing = housing %>%
   select(DAUID, per_pre1960, per_1960, per_1980, per_2000, housing_total)
 
 # attach a spaital component
+setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
 DA = st_read("./Data/lda_000a21a_e") %>%
   st_transform(crs = 3347) %>%
   select(DAUID)
 
 housing = DA %>%
-  left_join(housing, by = "DAUID")
+  left_join(housing_year, by = "DAUID")
+
+# export the file into the interim
 
 
-## Attach the housing data to the main street scale ---------------------------
+#### Processing the Housing Type Data  ####
+
+# load in the Housing Type data
+setwd("~/cmhc-scaling")
+housing_type = read_csv("./Data/Housing_Data.csv") %>%
+  select(Key, (11:16)) %>%
+  mutate(DAUID = as.character(Key),
+         Detached_Housing = ECYSTYSING + ECYSTYSEMI,
+         Row = ECYSTYROW,
+         Lowrise_Apt = ECYSTYAPU5,
+         Highrise_Apt = ECYSTYAP5P,
+         Duplex = ECYSTYDUPL) %>%
+  select((8:13))
+
+# Get the percentages
+housing_type = housing_type %>%
+  mutate(
+    housing_total = Detached_Housing + Row + Lowrise_Apt + Highrise_Apt + Duplex,
+    Detached_Housing = Detached_Housing / housing_total * 100,
+    Row = Row / housing_total * 100,
+    Lowrise_Apt = Lowrise_Apt / housing_total * 100,
+    Highrise_Apt = Highrise_Apt / housing_total * 100,
+    Duplex = Duplex / housing_total * 100
+  )
+
+
+# attach a spaital component
+setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
+DA = st_read("./Data/lda_000a21a_e") %>%
+  st_transform(crs = 3347) %>%
+  select(DAUID)
+
+housing_type = DA %>%
+  left_join(housing_type, by = "DAUID")
+
+
+# export the file into the interim
+
+
+
+
+
+
+
+  
+## Attach the housing data to the main street scale
 msn_base_housing = st_join(msn_base %>% select(id), st_buffer(housing, 1000), join = st_intersects, left = TRUE)
 
 msn_base_housing = msn_base_housing %>%
@@ -69,16 +121,8 @@ msn_base_housing = msn_base_housing %>%
   mutate(across(all_of(c("per_pre1960", "per_1960", "per_1980", "per_2000")), ~ weighted.mean(., w = housing_total, na.rm = TRUE))) %>%
   distinct(id, .keep_all = TRUE)
 
-# join back to the msn base
-msn_base = msn_base %>%
-  left_join(msn_base_housing %>% select(-DAUID, -housing_total), by = "id")
 
-# convert into national percentiles
-msn_base = msn_base %>%
-  mutate(per_pre1960 = cume_dist(per_pre1960),
-         per_1960 = cume_dist(per_1960),
-         per_1980 = cume_dist(per_1980),
-         per_2000 = cume_dist(per_2000))
+
 
 ## Defining the reference observation -----------------------------------------
 
