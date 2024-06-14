@@ -31,7 +31,7 @@ msn_base = msn_base %>%
 
 #--------------------------------------------------------------------------------------------------------------------------------------
 
-#### Processing the Housing Consturctuin Year Data ####
+#### Processing the Housing Construction Year Data ####
 
 # load in the housing data
 setwd("~/cmhc-scaling")
@@ -54,17 +54,6 @@ housing_year = housing_year %>%
     per_2000 = built_01_23 / housing_total * 100
   ) %>%
   select(DAUID, per_pre1960, per_1960, per_1980, per_2000, housing_total)
-
-# attach a spaital component
-setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
-DA = st_read("./Data/lda_000a21a_e") %>%
-  st_transform(crs = 3347) %>%
-  select(DAUID)
-
-housing = DA %>%
-  left_join(housing_year, by = "DAUID")
-
-# export the file into the interim
 
 
 #### Processing the Housing Type Data  ####
@@ -93,17 +82,33 @@ housing_type = housing_type %>%
   )
 
 
-# attach a spaital component
+# join the housing construction year and housing type 
+housing_vars = housing_year %>%
+  left_join(housing_year, by = "DAUID")
+
+
+
+# attach a spatial component
 setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
 DA = st_read("./Data/lda_000a21a_e") %>%
   st_transform(crs = 3347) %>%
   select(DAUID)
 
-housing_type = DA %>%
-  left_join(housing_type, by = "DAUID")
+housing = DA %>%
+  left_join(housing_vars, by = "DAUID")
 
 
 # export the file into the interim
+# load in the Housing Type data
+setwd("~/cmhc-scaling")
+write.csv(housing_vars, "./Interim/housing_vars.csv")
+
+
+# ----------------------------------------------------------------------------------------------------------
+
+#### Processing the Surface Parking Data ####
+
+
 
 
 
