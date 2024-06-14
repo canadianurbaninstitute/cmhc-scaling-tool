@@ -1,16 +1,20 @@
 library(tidyverse)
 library(sf)
 library(proxy)
+library(units)
 
 setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
 getwd()
+options(scipen = 999)
 
 
 ## Preprocessing the road data ------------------------------------------------
 
 # load in the rki base network
 msn_base = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_allmetrics/geojsons/msn_base_all.geojson") %>%
-  select((1:10), per_business_density, per_civic_density, per_employment_density, per_business_independence_index, per_population_change) %>%
+  select((1:10), per_business_density, per_civic_density, per_employment_density, per_business_independence_index,
+         per_population_change, per_population_density, per_visible_minorities, per_indigenous, per_immigrants_non_permanent_residents,
+         per_average_employment_income) %>%
   filter(!is.na(per_population_change)) %>%
   st_transform(crs = 3347)
 
@@ -28,6 +32,8 @@ main_streets = main_streets %>%
 msn_base = msn_base %>%
   semi_join(st_drop_geometry(main_streets), by = "id")
 
+rm(high_density, low_density, main_streets)
+
 
 #--------------------------------------------------------------------------------------------------------------------------------------
 
@@ -40,20 +46,18 @@ housing_year = read_csv("./Data/Housing_Data.csv") %>%
   rename("DAUID" = Key) %>%
   mutate(DAUID = as.character(DAUID),
          built_pre1960 = ECYPOCP60,
-         built_61_80 = ECYPOC6180,
-         built_81_00 = ECYPOC8190 + ECYPOC9100,
+         built_61_00 = ECYPOC6180 + ECYPOC8190 + ECYPOC9100,
          built_01_23 = ECYPOC0105 + ECYPOC0610 + ECYPOC1115 + ECYPOC1621 + ECYPOC22P) %>%
-  select(DAUID, (11:14))
+  select(DAUID, (11:13))
 
 housing_year = housing_year %>%
   mutate(
-    housing_total = built_pre1960 + built_61_80 + built_81_00 + built_01_23,
+    housing_total = built_pre1960 + built_61_00 +  built_01_23,
     per_pre1960 = built_pre1960 / housing_total * 100,
-    per_1960 = built_61_80 / housing_total * 100,
-    per_1980 = built_81_00 / housing_total * 100,
-    per_2000 = built_01_23 / housing_total * 100
+    per_61_00 = built_61_00 / housing_total * 100,
+    per_00_23 = built_01_23 / housing_total * 100
   ) %>%
-  select(DAUID, per_pre1960, per_1960, per_1980, per_2000, housing_total)
+  select(DAUID, per_pre1960, per_61_00, per_00_23)
 
 
 #### Processing the Housing Type Data  ####
@@ -64,27 +68,23 @@ housing_type = read_csv("./Data/Housing_Data.csv") %>%
   select(Key, (11:16)) %>%
   mutate(DAUID = as.character(Key),
          Detached_Housing = ECYSTYSING + ECYSTYSEMI,
-         Row = ECYSTYROW,
-         Lowrise_Apt = ECYSTYAPU5,
-         Highrise_Apt = ECYSTYAP5P,
-         Duplex = ECYSTYDUPL) %>%
-  select((8:13))
+         Mid_Density = ECYSTYROW + ECYSTYAPU5 + ECYSTYDUPL,
+         Highrise_Apt = ECYSTYAP5P) %>%
+  select((8:11))
 
 # Get the percentages
 housing_type = housing_type %>%
   mutate(
-    housing_total = Detached_Housing + Row + Lowrise_Apt + Highrise_Apt + Duplex,
+    housing_total = Detached_Housing + Mid_Density + Highrise_Apt,
     Detached_Housing = Detached_Housing / housing_total * 100,
-    Row = Row / housing_total * 100,
-    Lowrise_Apt = Lowrise_Apt / housing_total * 100,
+    Mid_Density = Mid_Density / housing_total * 100,
     Highrise_Apt = Highrise_Apt / housing_total * 100,
-    Duplex = Duplex / housing_total * 100
   )
 
 
 # join the housing construction year and housing type 
 housing_vars = housing_year %>%
-  left_join(housing_year, by = "DAUID")
+  left_join(housing_type, by = "DAUID")
 
 
 
@@ -97,6 +97,18 @@ DA = st_read("./Data/lda_000a21a_e") %>%
 housing = DA %>%
   left_join(housing_vars, by = "DAUID")
 
+## Attach the housing data to the main street scale
+# according to the main street proposals from the case study opportunities were found up to 250 metres from the
+# defined road segment
+msn_base_housing = st_join(msn_base %>% select(id), st_buffer(housing, 250), join = st_intersects, left = TRUE)
+
+msn_base_housing = msn_base_housing %>%
+  st_drop_geometry() %>%
+  group_by(id) %>%
+  mutate(across(all_of(c("per_pre1960", "per_61_00", "per_00_23",
+                         "Detached_Housing", "Mid_Density", "Highrise_Apt")), ~ weighted.mean(., w = housing_total, na.rm = TRUE))) %>%
+  distinct(id, .keep_all = TRUE)
+
 
 # export the file into the interim
 # load in the Housing Type data
@@ -104,158 +116,150 @@ setwd("~/cmhc-scaling")
 write.csv(housing_vars, "./Interim/housing_vars.csv")
 
 
+rm(housing_type, housing_vars, housing_year, housing)
+
+
 # ----------------------------------------------------------------------------------------------------------
 
 #### Processing the Surface Parking Data ####
 
+# load in the surface parking
+setwd("~/cmhc-scaling")
+surface_parking = st_read("./Data/parking_sf/canada_parking.geojson") %>%
+  select(osm_id) %>%
+  st_transform(crs = 3347)
 
+# preform an intersection with the main street network
+msn_base_parking = st_intersection(st_buffer(msn_base %>% select(id), 250), surface_parking)
 
-
-
-
-
-
-
-  
-## Attach the housing data to the main street scale
-msn_base_housing = st_join(msn_base %>% select(id), st_buffer(housing, 1000), join = st_intersects, left = TRUE)
-
-msn_base_housing = msn_base_housing %>%
+# get the sum of surface parking area
+msn_base_parking = msn_base_parking %>%
+  mutate(area = st_area(geometry),
+         area = drop_units(area)) %>%
   st_drop_geometry() %>%
   group_by(id) %>%
-  mutate(across(all_of(c("per_pre1960", "per_1960", "per_1980", "per_2000")), ~ weighted.mean(., w = housing_total, na.rm = TRUE))) %>%
-  distinct(id, .keep_all = TRUE)
+  summarise(surface_Parking = sum(area))
 
 
+# combine all the datasets together
+
+msn_base_final = msn_base %>%
+  left_join(msn_base_housing %>% select(-DAUID, -housing_total) %>% st_drop_geometry(), by = "id")
+
+msn_base_final = msn_base_final %>%
+  left_join(msn_base_parking, by = "id") %>%
+  mutate(surface_Parking = replace_na(surface_Parking, 0))
 
 
-## Defining the reference observation -----------------------------------------
+# convert all the added columns into percentiles
+msn_base_final = msn_base_final %>%
+  mutate(per_pre1960 = cume_dist(per_pre1960),
+         per_61_00 = cume_dist(per_61_00),
+         per_00_23 = cume_dist(per_00_23),
+         Detached_Housing = cume_dist(Detached_Housing),
+         Mid_Density = cume_dist(Mid_Density),
+         Highrise_Apt = cume_dist(Highrise_Apt),
+         surface_Parking = cume_dist(surface_Parking))
+
+rm(surface_parking)
+
+# ------------------------------------------------------------------------------------------------
+
+#### CREATING THE SIMILARITY SCORE FUNCTION ####
+
+# this function will take in a list of road segments and output a spatial data frame
+# of similar streets
+
+similar_streets = function(road_network, list_of_streets){
+  
+  # calculate the average values of the study area for the variables that will
+  # be used in the similarity calculation
+  
+  initial_roads = road_network %>%
+    filter(!is.na(per_business_density) & id %in% list_of_streets)
+  
+  initial_roads = initial_roads %>%
+    mutate(across(all_of(c(11:27)), ~ mean(., na.rm = TRUE))) %>%
+    st_drop_geometry() %>%
+    distinct(per_business_density, .keep_all = TRUE)
+  
+  
+  # remove the control roads from the larger sample
+  test_roads = road_network %>%
+    filter(!id %in% list_of_streets) %>%
+    st_drop_geometry()
+  
+  # calculate the similarity metric for each of the four categories
+  # Urban form - per_population_density / per_employment_density / per_population_change
+  # Street Content - per_business_density / per_civic_density / per_business_independence_index / surface_parking
+  # Housing Stock - per_pre1960 / per_61_00 / per_00_23 / Detached_Housing / Mid_Density / Highrise_Apt
+  # Demographics - per_indigenous / per_visible_minorities / per_immigrants_non_permanent_residents / 
+  # per_average_employment_income
+  
+  # urban form
+  urban_form_dist = proxy::dist(test_roads %>% select(per_population_density, per_population_change, per_employment_density),
+                                initial_roads %>% select(per_population_density, per_population_change, per_employment_density),
+                                method = "Euclidean")
+  
+  urban_form_score = 1 / (1 + urban_form_dist)
+  urban_form_score = as.numeric(urban_form_score)
+  
+  # Street Content
+  street_dist = proxy::dist(test_roads %>% select(per_business_density, per_civic_density, per_business_independence_index,
+                                                  surface_Parking), 
+                            initial_roads %>% select(per_business_density, per_civic_density, per_business_independence_index,
+                                                    surface_Parking),
+                            method = "Euclidean")
+  
+  street_score = 1 / (1 + street_dist)
+  street_score = as.numeric(street_score)
+  
+  # Housing Stock
+  housing_dist = proxy::dist(test_roads %>% select(per_pre1960, per_61_00, per_00_23, Detached_Housing, Mid_Density, Highrise_Apt),
+                             initial_roads %>% select(per_pre1960, per_61_00, per_00_23, Detached_Housing, Mid_Density, Highrise_Apt),
+                             method = "Euclidean")
+  
+  housing_score = 1 / (1 + housing_dist)
+  housing_score = as.numeric(housing_score)
+  
+  # Demographic
+  demo_dist = proxy::dist(test_roads %>% select(per_indigenous, per_visible_minorities, per_immigrants_non_permanent_residents,
+                                                per_average_employment_income),
+                          initial_roads %>% select(per_indigenous, per_visible_minorities, per_immigrants_non_permanent_residents,
+                                                   per_average_employment_income),
+                          method = "Euclidean")
+  
+  demo_score = 1 / (1 + demo_dist)
+  demo_score = as.numeric(demo_score)
+  
+  
+  # combine all metrics and take the average
+  score_summary = tibble(urban_form = unlist(urban_form_score),
+                         street_content = unlist(street_score),
+                         housing = unlist(housing_score),
+                         demos = unlist(demo_score))
+  
+  score_summary = score_summary %>%
+    mutate(sim_index =  rowMeans(select(., urban_form:demos), na.rm = TRUE))
+  
+  
+  # join the scores back to the test scores
+  test_roads = bind_cols(test_roads, score_summary)
+  
+  # filter all roads where the average in above a threshold of 0.75
+  final_set = test_roads %>%
+    filter(sim_index >= 0.75)
+  
+  # return the final set
+  return(final_set)
+}
+
+
+final_set = msn_base %>%
+  select(id) %>%
+  inner_join(final_set, by = "id")
+
+st_write(final_set, "./Ouput/scaling_test.shp")
 
 # create a subset based on street ids
-selected_roads = c("188450", "187365", "187428", "188525")
-
-# get the percentile average of all variables
-initial_case = msn_base %>%
-  filter(!is.na(per_business_density) & (id %in% selected_roads)) %>%
-  mutate(across(all_of(c(11:64)), ~ mean(., na.rm = TRUE))) %>%
-  st_drop_geometry() %>%
-  distinct(per_business_density, .keep_all = TRUE)
-
-
-# remove all the selected road segments from the large base
-msn_base =  msn_base%>%
-  filter(!id %in% selected_roads)
-
-
-## Similarity calculation for urban form variables ----------------------------
-
-# Get the population, business and civic density for the large set and case study
-initial_case_urban_form = initial_case %>%
-  select(per_business_density, per_civic_density, per_population_density) %>%
-  st_drop_geometry()
-
-msn_urban_form = msn_base %>%
-  select(per_business_density, per_civic_density, per_population_density) %>%
-  st_drop_geometry()
-
-# calculate a distance matrix between the msn base set and the initial case study
-urban_form_distance = proxy::dist(msn_urban_form, initial_case_urban_form, method = "Euclidean")
-
-# convert to a similarity score
-similarity_score = 1 / (1 + urban_form_distance)
-
-similarity_score = as.numeric(similarity_score)
-
-# join back to the msn_base
-msn_base = msn_base %>%
-  mutate(urban_form_similarity = similarity_score)
-
-# filter the base set based on the similarity of urban form
-form_q3 = quantile(msn_base$urban_form_similarity, probs = 0.75)
-
-msn_base_final_set = msn_base %>%
-  filter(urban_form_similarity >= form_q3)
-
-st_write(msn_base_final_set, "C:/Users/atabascio/CUI/Projects - External - Documents/829. CMHC Housing on Main Streets/3 - Background Data & Research/Data/scailing_test/ottawa1.geojson", driver = "GeoJSON")
-
-
-msn_base_final_set %>%
-  count(city_name) %>% arrange(desc(n))
-
-
-
-## Similarity calculation for Housing Outlook ---------------------------------
-
-# Get the housing construction percentages for the large set and case study
-initial_case_housing = initial_case %>%
-  select(per_pre1960, per_1960, per_1980, per_2000) %>%
-  st_drop_geometry()
-
-msn_housing = msn_base %>%
-  select(per_pre1960, per_1960, per_1980, per_2000) %>%
-  st_drop_geometry()
-
-# calculate a distance matrix between the msn base set and the initial case study
-housing_distance = proxy::dist(msn_housing, initial_case_housing, method = "Euclidean")
-
-# convert to a similarity score
-similarity_score = 1 / (1 + housing_distance)
-
-similarity_score = as.numeric(similarity_score)
-
-msn_base = msn_base %>%
-  mutate(housing_similarity = similarity_score)
-
-housing_q3 = quantile(msn_base$housing_similarity, probs = 0.75)
-
-msn_base_housing_final_set = msn_base %>%
-  filter(housing_similarity >= housing_q3)
-
-# conduct an inner join with the final set
-
-msn_base_final_set = msn_base_final_set %>%
-  inner_join(msn_base_housing_final_set %>% select(id) %>% st_drop_geometry(), by = "id")
-
-st_write(msn_base_final_set, "C:/Users/atabascio/CUI/Projects - External - Documents/829. CMHC Housing on Main Streets/3 - Background Data & Research/Data/scailing_test/ottawa2.geojson", driver = "GeoJSON")
-
-msn_base_final_set %>%
-  count(city_name) %>% arrange(desc(n))
-
-
-## Similarity calculation for demographic outlook -----------------------------
-
-# Get the demographic percentages for the large set and case study
-initial_case_demo = initial_case %>%
-  select(per_population_change) %>%
-  st_drop_geometry()
-
-msn_demos = msn_base %>%
-  select(per_population_change) %>%
-  st_drop_geometry()
-
-# calculate a distance matrix between msn base set and the initial case
-demo_distance = proxy::dist(msn_demos, initial_case_demo, method = "Euclidean")
-
-# convert to a similarity score
-similarity_score= 1 / (1 + demo_distance)
-
-similarity_score = as.numeric(similarity_score)
-
-msn_base = msn_base %>%
-  mutate(demo_similarity = similarity_score)
-
-demo_q3 = quantile(msn_base$demo_similarity, probs = 0.75)
-
-msn_base_demo_final_set = msn_base %>%
-  filter(demo_similarity >= demo_q3)
-
-msn_base_final_set = msn_base_final_set %>%
-  inner_join(msn_base_demo_final_set %>% select(id) %>% st_drop_geometry(), by = "id")
-
-
-msn_base_final_set %>%
-  count(prname) %>% arrange(desc(n))
-
-
-# export the final set
-st_write(msn_base_final_set, "C:/Users/atabascio/CUI/Projects - External - Documents/829. CMHC Housing on Main Streets/3 - Background Data & Research/Data/scailing_test/test3.geojson", driver = "GeoJSON")
+montreal_rd = c("188450", "187365", "187428", "188525")
