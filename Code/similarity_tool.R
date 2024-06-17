@@ -254,6 +254,16 @@ similar_streets = function(road_network, list_of_streets){
   return(final_set)
 }
 
+# create a subset based on street ids
+montreal_rd = c("188450", "187365", "187428", "188525")
+
+elice_ave = c("95731", "95779")
+
+
+final_montreal_rd = similar_streets(msn_base_final, montreal_rd)
+
+final_elice_ave = similar_streets(msn_base_final, elice_ave)
+
 
 final_set = msn_base %>%
   select(id) %>%
