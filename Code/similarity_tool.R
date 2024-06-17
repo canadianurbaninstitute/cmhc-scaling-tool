@@ -1,3 +1,12 @@
+## Title: housing on main streets - similarity street tool
+## Author: Alex Tabascio
+## Date: 2024-06-17
+## Summary: This script preforms the outlined methodology used to identify similar streets to the
+## case studies outlined within the CMHC housing on main streets project based on four main pillars
+## Urban form, Street Content, Housing Stock, and Demographics
+
+
+
 library(tidyverse)
 library(sf)
 library(proxy)
@@ -265,11 +274,11 @@ final_montreal_rd = similar_streets(msn_base_final, montreal_rd)
 final_elice_ave = similar_streets(msn_base_final, elice_ave)
 
 
-final_set = msn_base %>%
+final_elice_ave = msn_base %>%
   select(id) %>%
-  inner_join(final_set, by = "id")
+  inner_join(final_elice_ave, by = "id")
 
-st_write(final_set, "./Ouput/scaling_test.shp")
+st_write(final_elice_ave, "./Ouput/final_elice_ave.geojson", driver = "GeoJSON")
 
-# create a subset based on street ids
-montreal_rd = c("188450", "187365", "187428", "188525")
+
+
