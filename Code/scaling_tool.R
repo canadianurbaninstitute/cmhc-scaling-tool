@@ -6,3 +6,10 @@
 ## proposed changes of the defined case studies
 
 
+## Load Libraries
+library(tidyverse)
+library(sf)
+
+
+setwd("~/cmhc-scaling")
+test = read_csv("./Data/address_data/joined_addresses_60.csv")
