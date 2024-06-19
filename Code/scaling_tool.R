@@ -15,6 +15,8 @@ library(sf)
 
 elice_ave = c("95731", "95779")
 
+montreal_rd = c("118659", "188525")
+
 setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
 
 # load in the elice avenue road segments
@@ -73,9 +75,14 @@ case_study_locations = st_join(location_data_clipped, initial_roads, join = st_n
 # get the summary of units for each address
 # used for internal testing
 address_summary = case_study_locations %>%
-  st_drop_geometry() %>%
   group_by(id, Address) %>%
   summarise(units = n())
+
+# export the adress points
+st_write(address_summary, "./Output/elice_ave_units.geojson", driver = "GeoJSON")
+
+address_summary = address_summary %>%
+  st_drop_geometry()
 
 address_summary = initial_roads %>%
   select((1:9)) %>%
@@ -83,11 +90,7 @@ address_summary = initial_roads %>%
 
 
 # export the final shapefile
-st_write(address_summary, "./Output/elice_ave_units.geojson", driver = "GeoJSON")
-
-
-
-
+write.csv(address_summary %>% st_drop_geometry(), "./Output/elice_ave_summary.csv")
 
 
 

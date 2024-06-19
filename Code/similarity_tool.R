@@ -1,176 +1,31 @@
 ## Title: housing on main streets - similarity street tool
 ## Author: Alex Tabascio
 ## Date: 2024-06-17
-## Summary: This script preforms the outlined methodology used to identify similar streets to the
-## case studies outlined within the CMHC housing on main streets project based on four main pillars
-## Urban form, Street Content, Housing Stock, and Demographics
+## Summary: This script contains all the tools to recreate the process done in the
+## housing on main streets research report for any main street in the country
 
+## Tools
 
+# similar_streets - this function produces a spatial object of similar streets given a list of main street
+# segments and the housing data created from the housing_data_setup.r script
+
+# get_casestudy_units - this function returns the location and unit count of every residential area within
+# 250 metres given a list of street segments
+
+# scale_housing_stock - this function returns an estimated total of units for all similar streets based on the 
+# proposed percentage increase.
+
+# more info on data and methodology can be found in the READ ME
 
 library(tidyverse)
 library(sf)
 library(proxy)
 library(units)
 
-setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
 getwd()
 options(scipen = 999)
 
 
-## Preprocessing the road data ------------------------------------------------
-
-# load in the rki base network
-msn_base = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_allmetrics/geojsons/msn_base_all.geojson") %>%
-  select((1:10), per_business_density, per_civic_density, per_employment_density, per_business_independence_index,
-         per_population_change, per_population_density, per_visible_minorities, per_indigenous, per_immigrants_non_permanent_residents,
-         per_average_employment_income) %>%
-  filter(!is.na(per_population_change)) %>%
-  st_transform(crs = 3347)
-
-# load in the identified main streets
-high_density = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_base/msn_highdensity.shp") %>%
-  rename("id" = ROADSEGID)
-low_density = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_base/msn_lowdensity.shp") %>%
-  rename("id" = ROADSEGID)
-
-main_streets = bind_rows(high_density, low_density)
-main_streets = main_streets %>%
-  distinct(id, .keep_all = TRUE)
-
-# get a subset of only main streets within the base network to better fit the project parameters
-msn_base = msn_base %>%
-  semi_join(st_drop_geometry(main_streets), by = "id")
-
-rm(high_density, low_density, main_streets)
-
-
-#--------------------------------------------------------------------------------------------------------------------------------------
-
-#### Processing the Housing Construction Year Data ####
-
-# load in the housing data
-setwd("~/cmhc-scaling")
-housing_year = read_csv("./Data/Housing_Data.csv") %>%
-  select(Key, (2:10)) %>%
-  rename("DAUID" = Key) %>%
-  mutate(DAUID = as.character(DAUID),
-         built_pre1960 = ECYPOCP60,
-         built_61_00 = ECYPOC6180 + ECYPOC8190 + ECYPOC9100,
-         built_01_23 = ECYPOC0105 + ECYPOC0610 + ECYPOC1115 + ECYPOC1621 + ECYPOC22P) %>%
-  select(DAUID, (11:13))
-
-housing_year = housing_year %>%
-  mutate(
-    housing_total = built_pre1960 + built_61_00 +  built_01_23,
-    per_pre1960 = built_pre1960 / housing_total * 100,
-    per_61_00 = built_61_00 / housing_total * 100,
-    per_00_23 = built_01_23 / housing_total * 100
-  ) %>%
-  select(DAUID, per_pre1960, per_61_00, per_00_23)
-
-
-#### Processing the Housing Type Data  ####
-
-# load in the Housing Type data
-setwd("~/cmhc-scaling")
-housing_type = read_csv("./Data/Housing_Data.csv") %>%
-  select(Key, (11:16)) %>%
-  mutate(DAUID = as.character(Key),
-         Detached_Housing = ECYSTYSING + ECYSTYSEMI,
-         Mid_Density = ECYSTYROW + ECYSTYAPU5 + ECYSTYDUPL,
-         Highrise_Apt = ECYSTYAP5P) %>%
-  select((8:11))
-
-# Get the percentages
-housing_type = housing_type %>%
-  mutate(
-    housing_total = Detached_Housing + Mid_Density + Highrise_Apt,
-    Detached_Housing = Detached_Housing / housing_total * 100,
-    Mid_Density = Mid_Density / housing_total * 100,
-    Highrise_Apt = Highrise_Apt / housing_total * 100,
-  )
-
-
-# join the housing construction year and housing type 
-housing_vars = housing_year %>%
-  left_join(housing_type, by = "DAUID")
-
-
-
-# attach a spatial component
-setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
-DA = st_read("./Data/lda_000a21a_e") %>%
-  st_transform(crs = 3347) %>%
-  select(DAUID)
-
-housing = DA %>%
-  left_join(housing_vars, by = "DAUID")
-
-## Attach the housing data to the main street scale
-# according to the main street proposals from the case study opportunities were found up to 250 metres from the
-# defined road segment
-msn_base_housing = st_join(msn_base %>% select(id), st_buffer(housing, 250), join = st_intersects, left = TRUE)
-
-msn_base_housing = msn_base_housing %>%
-  st_drop_geometry() %>%
-  group_by(id) %>%
-  mutate(across(all_of(c("per_pre1960", "per_61_00", "per_00_23",
-                         "Detached_Housing", "Mid_Density", "Highrise_Apt")), ~ weighted.mean(., w = housing_total, na.rm = TRUE))) %>%
-  distinct(id, .keep_all = TRUE)
-
-
-# export the file into the interim
-# load in the Housing Type data
-setwd("~/cmhc-scaling")
-write.csv(housing_vars, "./Interim/housing_vars.csv")
-
-
-rm(housing_type, housing_vars, housing_year, housing)
-
-
-# ----------------------------------------------------------------------------------------------------------
-
-#### Processing the Surface Parking Data ####
-
-# load in the surface parking
-setwd("~/cmhc-scaling")
-surface_parking = st_read("./Data/parking_sf/canada_parking.geojson") %>%
-  select(osm_id) %>%
-  st_transform(crs = 3347)
-
-# preform an intersection with the main street network
-msn_base_parking = st_intersection(st_buffer(msn_base %>% select(id), 250), surface_parking)
-
-# get the sum of surface parking area
-msn_base_parking = msn_base_parking %>%
-  mutate(area = st_area(geometry),
-         area = drop_units(area)) %>%
-  st_drop_geometry() %>%
-  group_by(id) %>%
-  summarise(surface_Parking = sum(area))
-
-
-# combine all the datasets together
-
-msn_base_final = msn_base %>%
-  left_join(msn_base_housing %>% select(-DAUID, -housing_total) %>% st_drop_geometry(), by = "id")
-
-msn_base_final = msn_base_final %>%
-  left_join(msn_base_parking, by = "id") %>%
-  mutate(surface_Parking = replace_na(surface_Parking, 0))
-
-
-# convert all the added columns into percentiles
-msn_base_final = msn_base_final %>%
-  mutate(per_pre1960 = cume_dist(per_pre1960),
-         per_61_00 = cume_dist(per_61_00),
-         per_00_23 = cume_dist(per_00_23),
-         Detached_Housing = cume_dist(Detached_Housing),
-         Mid_Density = cume_dist(Mid_Density),
-         Highrise_Apt = cume_dist(Highrise_Apt),
-         surface_Parking = cume_dist(surface_Parking))
-
-rm(surface_parking)
 
 # ------------------------------------------------------------------------------------------------
 
@@ -263,8 +118,19 @@ similar_streets = function(road_network, list_of_streets){
   return(final_set)
 }
 
+# -----------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
 # create a subset based on street ids
-montreal_rd = c("188450", "187365", "187428", "188525")
+montreal_rd = c("118659", "188525")
 
 elice_ave = c("95731", "95779")
 
