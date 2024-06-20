@@ -12,7 +12,7 @@
 # get_casestudy_units - this function returns the location and unit count of every residential area within
 # 250 metres given a list of street segments
 
-# scale_housing_stock - this function returns an estimated total of units for all similar streets based on the 
+# scale_housing - this function returns an estimated total of units for all similar streets based on the 
 # proposed percentage increase.
 
 # more info on data and methodology can be found in the READ ME
@@ -123,7 +123,7 @@ similar_streets = function(road_network, list_of_streets){
   return(final_set)
 }
 
-# -----------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 
 #### BASE HOUSING COUNT FUNCTION ####
 
@@ -133,7 +133,7 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
   initial_roads = road_network %>%
     filter(!is.na(per_business_density) & id %in% list_of_streets)
   
-  # turn the location data as a sptail data frame
+  # turn the location data as a spatial data frame
   location_data = location_data %>%
     filter(!is.na(reppoint_latitude))
   location_data_st = st_as_sf(location_data, coords = c("reppoint_longitude", "reppoint_latitude"), crs = 4326) %>%
@@ -158,9 +158,11 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
     ) %>%
     select(loc_guid, addr_guid, Address, bu_use)
   
+  roads_buffer = st_buffer(initial_roads, 250)
+  roads_buffer = st_combine(roads_buffer)
   
   # create an intersection between the buffered roads and the location data
-  location_data_clipped = st_intersection(st_buffer(initial_roads %>% select(), 250), location_data_st)
+  location_data_clipped = location_data_st[st_intersects(location_data_st, roads_buffer, sparse = FALSE), ]
   
   # with the initial data clipped preform a nearest neighbour join for the road segment id
   case_study_locations = st_join(location_data_clipped, initial_roads, join = st_nearest_feature)
@@ -178,9 +180,62 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
 
 
 
+# -----------------------------------------------------------------------------------------------
 
+#### HOUSING SCALING FUNCTION ####
 
-
+scale_housing = function(similarity_network, proposed_increase){
+  
+  # get the provincial codes for each similar street
+  provincial_codes = unique(similarity_network$pruid)
+  
+  # for each province within the similarity network
+  for(i in 1:length(provincial_codes)){
+    # filter the similarity network for each province
+    similarity_network_filter = similarity_network %>%
+      filter(pruid == provincial_codes[i])
+    
+    similarity_network_ids = unique(similarity_network_filter$id)
+    
+    # load the location data based on the province
+    file_directory = paste0("./Data/address_data/joined_addresses_", provincial_codes[i], ".csv")
+    location_data_prov = read.csv(file_directory) %>%
+      select((2:9), bu_use, reppoint_latitude, reppoint_longitude, -civic_no_suffix) %>%
+      filter(bu_use == 1 | bu_use == 2)
+    
+    # use the get_casestudy_units functions to get the count of units for each province
+    provincial_units = get_casestudy_units(similarity_network, location_data_prov, similarity_network_ids)
+    
+    # summarise the address by road id and attach the road variables back
+    provincial_units = provincial_units %>%
+      st_drop_geometry() %>%
+      group_by(id) %>%
+      summarise(base_units = sum(units))
+    
+    prov_road_summary = similarity_network_filter %>%
+      left_join(provincial_units, by = "id") %>%
+      mutate(base_units = replace_na(base_units, 0))
+    
+    # bind the data based on the iteration
+    if(i == 1){
+      all_roads = prov_road_summary
+    } else {
+      all_roads = bind_rows(all_roads, prov_road_summary)
+      
+    }
+  }
+  
+  # adjust the base_housing depending on the proposed increase
+  percentage = 1 + (proposed_increase / 100)
+  
+  all_roads_adjusted = all_roads %>%
+    mutate(adjuted_units = base_units * percentage)
+  
+  
+  # return the combine data set
+  return(all_roads_adjusted)
+  
+}
 
 
 
@@ -196,28 +251,23 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
 
 # ---------------------------------------------------------------------------------------------------------------------------
 
-
-# load in msn_base data
-setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
-msn_base = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_allmetrics/geojsons/msn_base_all.geojson") %>%
-  select((1:10), per_business_density, per_civic_density, per_employment_density, per_business_independence_index,
-         per_population_change, per_population_density, per_visible_minorities, per_indigenous, per_immigrants_non_permanent_residents,
-         per_average_employment_income) %>%
-  filter(!is.na(per_population_change)) %>%
-  st_transform(crs = 3347)
-
-
-# load in the address and location data for Manitoba
+# load in the housing variables
 setwd("~/cmhc-scaling")
-location_data = read.csv("./Data/address_data/joined_addresses_46.csv") %>%
-  select((2:9), bu_use, reppoint_latitude, reppoint_longitude, -civic_no_suffix) %>%
-  filter(bu_use == 1 | bu_use == 2)
+cmhc_base = st_read("./Interim/cmhc_ms_base.geojson") %>%
+  st_transform(crs = 3347)
 
 
 # create a subset based on street ids
 montreal_rd = c("118659", "188525")
 
 elice_ave = c("95731", "95779")
+
+
+montreal_rd_sim = similar_streets(cmhc_base, montreal_rd)
+st_write(montreal_rd_sim, "./Output/montreal_rd_sim.geojson")
+
+montreal_rd_scaled = scale_housing(montreal_rd_sim, 20)
+st_write(montreal_rd_scaled, "./Output/montreal_rd_scaled.geojson")
 
 
 
