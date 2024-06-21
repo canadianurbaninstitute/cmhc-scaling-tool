@@ -44,7 +44,7 @@ This repository will help support the goals of this project in three specific wa
  - Surface parking data comprised from Open Street Map using Geofabrink
 
 #### Unit Location Data
- - The National Address Register (NAR) sets up a standardized address structure and provides a list of valid georeferenced civic addresses in Canada. The addresses are extracted from Statistics Canada's Building Register and were validated by a minimum of two independent data sources.
+ - The National Address Register (NAR) sets up a standardized address structure and provides a list of valid georeferenced civic addresses in Canada. The addresses are extracted from Statistics Canada's Building Register and were validated by a minimum of two independent data sources. The Unit Location Data, due to its size, is split into provincal files
  
 
 ## Tools and Methodology
@@ -68,6 +68,47 @@ Similarly the area of surface parking was aggregated and attached to all main st
 
 
 #### similar_streets
+This tool takes an input list of baseline streets using their respective road segment id and returns a data frame of similar streets within a pre-defined threshold based using a series a similarity scores that model the urban and demographic makeup of the area.
+
+Method
+
+1. Calculate the average values of the baseline streets that will be used for the similarity calculation
+
+2. Calculate a distance matrix between the average of the baseline streets and every street in the Main Street Base Network and convert that into a score of similarity where 0 is not similar and 1 is identical.
+      Urban Form - population density / employment density / population change
+      Street Content - main street business_density / civic density / business independence / surface parking
+      Housing Stock - pre-1960 / construction year 61-00 / construction year 00-23 / Detached Housing / Mid Density / High-rise Apt
+      Demographics - indigenous / visible minorities / immigrants and non-permanent residents / average employment income
+      
+3. Take the average of all four metrics and return within a defined threshold (default is 0.75)
+
+
+#### get_casestudy_units
+This tool takes a input list of baseline streets and the provincial data location file, and return the location and count of all units within a predefined distance of the baseline streets
+
+Method
+
+1. Turn the location csv file into a spatial object using it's respective coordinate data
+
+2. For the baseline of streets create a buffered and dissolve polygon of a predefined distance, default value = 250 metres
+
+3. Preform a spatial intersection between the road buffer and the location data
+
+4. Calculate the sum of units by counting the total units for a given road segment id and address
+
+
+
+#### scale_housing
+This tool take the previously created data frame of similar streets and provides to total number of units along each road segment within 250 metres, but also provides the adjusted number based on an inputted percentage
+
+Method
+
+1. Create a for loop that iterates through each unique province within the similar street data frame
+
+2. For each province; filter the similar street road network and create a list of road segment id's, load in the location data for that province and run the case study units to get the count of units for each segment.
+
+3. Combine all roads for each province and create the adjusted total
+
 
 
 
