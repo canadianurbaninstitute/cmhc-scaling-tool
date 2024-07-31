@@ -159,7 +159,7 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
     select(loc_guid, addr_guid, Address, bu_use)
   
   roads_buffer = st_buffer(initial_roads, 250)
-  roads_buffer = st_combine(roads_buffer)
+  roads_buffer = st_union(roads_buffer)
   
   # create an intersection between the buffered roads and the location data
   location_data_clipped = location_data_st[st_intersects(location_data_st, roads_buffer, sparse = FALSE), ]
@@ -256,14 +256,27 @@ setwd("~/cmhc-scaling")
 cmhc_base = st_read("./Interim/cmhc_ms_base.geojson") %>%
   st_transform(crs = 3347)
 
+unit_data = read_csv("./Data/address_data/joined_addresses_35.csv")
+
+
 
 # create a subset based on street ids
-montreal_rd = c("118659", "188525")
+montreal_rd = c("118659", "188525", "187365", "188450")
 
-elice_ave = c("95731", "95779")
+elice_ave = c("79466", "79859", "95779")
+
+lancaster_st = c("197566")
+
+first_ave = c("31757")
 
 
-montreal_rd_sim = similar_streets(cmhc_base, montreal_rd)
+
+
+units_count = get_casestudy_units(cmhc_base, unit_data, montreal_rd)
+st_write(units_count, "./Output/montreal_rd_units.geojson")
+
+
+sim_streets = similar_streets(cmhc_base, montreal_rd)
 st_write(montreal_rd_sim, "./Output/montreal_rd_sim.geojson")
 
 montreal_rd_scaled = scale_housing(montreal_rd_sim, 20)
