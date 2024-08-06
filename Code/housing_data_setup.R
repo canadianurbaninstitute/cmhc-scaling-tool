@@ -173,8 +173,50 @@ msn_base_final = msn_base_final %>%
          per_surface_Parking_lots = cume_dist(surface_Parking_lots),
          per_surface_Parking_area = cume_dist(surface_Parking_area))
 
+
+# -----------------------------------------------------------------------------------------------------------
+
+#### Processing the Gas Station Data ####
+
+# load in the national business data and filter out Gas Stations
+setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
+gas_stations = st_read("./Interim/BusinessAndCivic/all")
+naics_code = read_csv("./Data/EA_Data_Export/Businesses_Canada.csv") %>%
+  select(`Unique Identifier`, `NAICS Code - 4 Digit`) %>%
+  rename("Uni_Id" = `Unique Identifier`, "NAICS_4" = `NAICS Code - 4 Digit`)
+
+gas_stations = gas_stations %>%
+  inner_join(naics_code, by = "Uni_Id")
+
+# filter out all gas stations
+gas_stations = gas_stations %>%
+  filter(NAICS_4 == 4471)
+
+# preform an intersection with the main street network
+msn_base_gas = st_intersection(st_buffer(msn_base %>% select(id), 250), gas_stations)
+
+# get the sum of surface parking area
+msn_base_gas = msn_base_gas %>%
+  st_drop_geometry() %>%
+  group_by(id) %>%
+  summarise(gas_stations = sum(n()))
+
+# combine to the other data sets
+msn_base_final = msn_base_final %>%
+  left_join(msn_base_gas, by = "id") %>%
+  mutate(gas_stations = replace_na(gas_stations, 0))
+
+
+
 # export the final housing data
 st_write(msn_base_final, "./Interim/cmhc_ms_base.geojson", driver = "GeoJson")
 
 
-rm(surface_parking)
+
+
+
+
+
+
+
+
