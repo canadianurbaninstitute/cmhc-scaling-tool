@@ -21,7 +21,7 @@ options(scipen = 999)
 
 # load in the rki base network
 msn_base = st_read("./Interim/MainStreetRoadNetwork/CANADA/mainstreet_allmetrics/geojsons/msn_base_all.geojson") %>%
-  select((1:10), per_business_density, per_civic_density, per_employment_density, per_business_independence_index,
+  select((1:10), business_count, civic_count, per_business_density, per_civic_density, per_employment_density, per_business_independence_index,
          per_population_change, per_population_density, per_visible_minorities, per_indigenous, per_immigrants_non_permanent_residents,
          per_average_employment_income) %>%
   filter(!is.na(per_population_change)) %>%
@@ -147,7 +147,8 @@ msn_base_parking = msn_base_parking %>%
          area = drop_units(area)) %>%
   st_drop_geometry() %>%
   group_by(id) %>%
-  summarise(surface_Parking = sum(area))
+  summarise(surface_Parking_lots = sum(n()),
+            surface_Parking_area = sum(area))
 
 
 # combine all the datasets together
@@ -157,7 +158,8 @@ msn_base_final = msn_base %>%
 
 msn_base_final = msn_base_final %>%
   left_join(msn_base_parking, by = "id") %>%
-  mutate(surface_Parking = replace_na(surface_Parking, 0))
+  mutate(surface_Parking_area = replace_na(surface_Parking_area, 0),
+         surface_Parking_lots = replace_na(surface_Parking_lots, 0))
 
 
 # convert all the added columns into percentiles
@@ -168,7 +170,8 @@ msn_base_final = msn_base_final %>%
          Detached_Housing = cume_dist(Detached_Housing),
          Mid_Density = cume_dist(Mid_Density),
          Highrise_Apt = cume_dist(Highrise_Apt),
-         surface_Parking = cume_dist(surface_Parking))
+         per_surface_Parking_lots = cume_dist(surface_Parking_lots),
+         per_surface_Parking_area = cume_dist(surface_Parking_area))
 
 # export the final housing data
 st_write(msn_base_final, "./Interim/cmhc_ms_base.geojson", driver = "GeoJson")
