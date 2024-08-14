@@ -70,9 +70,9 @@ similar_streets = function(road_network, list_of_streets){
   
   # Street Content
   street_dist = proxy::dist(test_roads %>% select(per_business_density, per_civic_density, per_business_independence_index,
-                                                  surface_Parking), 
+                                                  per_surface_Parking_area), 
                             initial_roads %>% select(per_business_density, per_civic_density, per_business_independence_index,
-                                                    surface_Parking),
+                                                     per_surface_Parking_area),
                             method = "Euclidean")
   
   street_score = 1 / (1 + street_dist)
@@ -135,7 +135,7 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
   
   # turn the location data as a spatial data frame
   location_data = location_data %>%
-    filter(!is.na(reppoint_latitude))
+    filter(!is.na(reppoint_latitude) & bu_use != 4)
   location_data_st = st_as_sf(location_data, coords = c("reppoint_longitude", "reppoint_latitude"), crs = 4326) %>%
     st_transform(crs = 3347)
   
@@ -171,7 +171,17 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
   # used for internal testing
   address_summary = case_study_locations %>%
     group_by(id, Address) %>%
-    summarise(units = n())
+    summarise(units = n(),
+              bu_use = round(mean(bu_use), 1))
+  
+  # readjust if the mean doesn't equal a whole number to mixed use
+  address_summary = address_summary %>%
+    mutate(bu_use = (case_when(
+      bu_use == 1.0 ~ 1.0,
+      bu_use == 2.0 ~ 2.0,
+      bu_use == 3.0 ~ 3.0,
+      TRUE ~ 3.0
+    )))
   
   # return the address points
   return(address_summary)
@@ -184,7 +194,7 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
 
 #### HOUSING SCALING FUNCTION ####
 
-scale_housing = function(similarity_network, proposed_increase){
+scale_housing = function(similarity_network){
   
   # get the provincial codes for each similar street
   provincial_codes = unique(similarity_network$pruid)
@@ -201,20 +211,36 @@ scale_housing = function(similarity_network, proposed_increase){
     file_directory = paste0("./Data/address_data/joined_addresses_", provincial_codes[i], ".csv")
     location_data_prov = read.csv(file_directory) %>%
       select((2:9), bu_use, reppoint_latitude, reppoint_longitude, -civic_no_suffix) %>%
-      filter(bu_use == 1 | bu_use == 2)
+      filter(bu_use != 4)
     
     # use the get_casestudy_units functions to get the count of units for each province
     provincial_units = get_casestudy_units(similarity_network, location_data_prov, similarity_network_ids)
+    
+    
+    # Add the logic for the Low-Density Sites
+    provincial_units = provincial_units %>%
+      mutate(LD_site_conversion = case_when(
+        # SDH
+        bu_use == 1 & units <= 1 ~ "Residential",
+        # Commercial
+        bu_use == 2 & units <= 2 ~ "Commercial",
+        # Mixed Use
+        bu_use == 3 & units <= 3 ~ "Mixed-Use",
+        TRUE ~ "Not-Eligible"
+      ))
     
     # summarise the address by road id and attach the road variables back
     provincial_units = provincial_units %>%
       st_drop_geometry() %>%
       group_by(id) %>%
-      summarise(base_units = sum(units))
-    
+      count(LD_site_conversion) %>%
+      pivot_wider(names_from = "LD_site_conversion", values_from = "n") 
+  
+    columns_to_replace = c("Commercial", "Mixed-Use", "Not-Eligible", "Residential")
+      
     prov_road_summary = similarity_network_filter %>%
       left_join(provincial_units, by = "id") %>%
-      mutate(base_units = replace_na(base_units, 0))
+      mutate(across(all_of(columns_to_replace), ~ replace_na(., 0)))
     
     # bind the data based on the iteration
     if(i == 1){
@@ -225,26 +251,25 @@ scale_housing = function(similarity_network, proposed_increase){
     }
   }
   
-  # adjust the base_housing depending on the proposed increase
-  percentage = 1 + (proposed_increase / 100)
+  # get the scaling total by adding all civic locations, parking lots,
+  # gas stations and Low Density Conversions
+  all_roads = all_roads %>%
+    rowwise() %>%
+    mutate(total_sites = sum(c_across(c(civic_count, surface_Parking_lots, gas_stations,
+                                        Commercial, `Mixed-Use`, Residential))))
   
-  all_roads_adjusted = all_roads %>%
-    mutate(adjuted_units = base_units * percentage)
   
+  columns = c("civic_count", "surface_Parking_lots", "gas_stations", "Commercial",
+              "Mixed-Use", "Residential", "total_sites")
+  
+  
+  all_roads = all_roads %>%
+    select(-all_of(columns), everything(), all_of(columns))
   
   # return the combine data set
-  return(all_roads_adjusted)
+  return(all_roads)
   
 }
-
-
-
-
-
-
-
-
-
 
 
 
@@ -256,7 +281,7 @@ setwd("~/cmhc-scaling")
 cmhc_base = st_read("./Interim/cmhc_ms_base.geojson") %>%
   st_transform(crs = 3347)
 
-unit_data = read_csv("./Data/address_data/joined_addresses_35.csv")
+unit_data = read_csv("./Data/address_data/joined_addresses_46.csv")
 
 
 
@@ -271,18 +296,42 @@ first_ave = c("31757")
 
 
 
+# unit count for case studies
+units_count = get_casestudy_units(cmhc_base, unit_data, first_ave)
+st_write(units_count, "./Output/FirstAve/first_ave_units.geojson")
 
-units_count = get_casestudy_units(cmhc_base, unit_data, montreal_rd)
-st_write(units_count, "./Output/montreal_rd_units.geojson")
+# site count for case study
+case_study_street = cmhc_base %>%
+  subset(id %in% first_ave)
+case_study_street_FirstAve = scale_housing(case_study_street)
+write.csv(case_study_street_FirstAve %>% st_drop_geometry(), "./Output/first_ave_site_count.csv")
+
+# scaling tool
+sim_streets = similar_streets(cmhc_base, first_ave)
+
+scaled_streets_FirstAve = scale_housing(sim_streets)
+st_write(scaled_streets_FirstAve, "./Output/first_ave_scaled.geojson")
+
+scaled_streets_FirstAve = scaled_streets_FirstAve %>%
+  st_drop_geometry() %>%
+  select((1:9), civic_count, surface_Parking_lots, gas_stations,
+         Commercial, `Mixed-Use`, Residential, total_sites) %>%
+  mutate(case_study = "First Ave")
 
 
-sim_streets = similar_streets(cmhc_base, montreal_rd)
-st_write(montreal_rd_sim, "./Output/montreal_rd_sim.geojson")
-
-montreal_rd_scaled = scale_housing(montreal_rd_sim, 20)
-st_write(montreal_rd_scaled, "./Output/montreal_rd_scaled.geojson")
+write.csv(scaled_streets_FirstAve, "./Output/first_ave_scaled.csv")
 
 
+# Get number for all case studies
+All_case_studies = bind_rows(case_study_street_EliceAve, case_study_street_FirstAve, case_study_street_LancasterSt, case_study_street_MontrealRd)
+
+write.csv(All_case_studies %>% st_drop_geometry(), "./Output/All_CaseStudies.csv")
 
 
+# Get numbers for all similar streets
+All_sim_streets = bind_rows(scaled_streets_EliceAve, scaled_streets_FirstAve, scaled_streets_LancasterSt, scaled_streets_MontrealRd)
 
+All_sim_streets = All_sim_streets %>%
+  distinct(id, .keep_all = TRUE)
+
+write.csv(All_sim_streets %>% st_drop_geometry(), "./Output/All_SimStreets.csv")
