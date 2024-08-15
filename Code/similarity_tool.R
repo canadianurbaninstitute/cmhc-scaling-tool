@@ -164,6 +164,7 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
   # create an intersection between the buffered roads and the location data
   location_data_clipped = location_data_st[st_intersects(location_data_st, roads_buffer, sparse = FALSE), ]
   
+  
   # with the initial data clipped preform a nearest neighbour join for the road segment id
   case_study_locations = st_join(location_data_clipped, initial_roads, join = st_nearest_feature)
   
@@ -182,6 +183,7 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
       bu_use == 3.0 ~ 3.0,
       TRUE ~ 3.0
     )))
+  
   
   # return the address points
   return(address_summary)
@@ -228,6 +230,21 @@ scale_housing = function(similarity_network){
         bu_use == 3 & units <= 3 ~ "Mixed-Use",
         TRUE ~ "Not-Eligible"
       ))
+    
+    # remove residential address where units are in the same location
+    residential_conversions = provincial_units %>%
+      filter(LD_site_conversion == "Residential" | LD_site_conversion == "Commercial" | LD_site_conversion == "Mixed-Use")
+    
+    duplicate_pairs = st_equals(residential_conversions)
+    
+    # Filter out pairs where indices are equal (same point compared to itself)
+    duplicate_pairs = duplicate_pairs[lengths(duplicate_pairs) > 1]
+    
+    # Create a list of all duplicate IDs
+    duplicate_ids = unique(unlist(lapply(duplicate_pairs, function(x) residential_conversions$Address[x])))
+    
+    # Filter out duplicates from the original sf dataframe
+    provincial_units = provincial_units %>% filter(!Address %in% duplicate_ids)
     
     # summarise the address by road id and attach the road variables back
     provincial_units = provincial_units %>%
@@ -281,7 +298,7 @@ setwd("~/cmhc-scaling")
 cmhc_base = st_read("./Interim/cmhc_ms_base.geojson") %>%
   st_transform(crs = 3347)
 
-unit_data = read_csv("./Data/address_data/joined_addresses_46.csv")
+unit_data = read_csv("./Data/address_data/joined_addresses_35.csv")
 
 
 
@@ -294,36 +311,38 @@ lancaster_st = c("197566")
 
 first_ave = c("31757")
 
+lakeshore = c("190920")
+
 
 
 # unit count for case studies
-units_count = get_casestudy_units(cmhc_base, unit_data, first_ave)
-st_write(units_count, "./Output/FirstAve/first_ave_units.geojson")
+units_count = get_casestudy_units(cmhc_base, unit_data, lakeshore)
+st_write(units_count, "./Output/lakeshore_units.geojson")
 
 # site count for case study
 case_study_street = cmhc_base %>%
-  subset(id %in% first_ave)
-case_study_street_FirstAve = scale_housing(case_study_street)
-write.csv(case_study_street_FirstAve %>% st_drop_geometry(), "./Output/first_ave_site_count.csv")
+  subset(id %in% montreal_rd)
+case_study_street_montreal_rd = scale_housing(case_study_street)
+write.csv(case_study_street_montreal_rd %>% st_drop_geometry(), "./Output/montreal_rd_site_count.csv")
 
 # scaling tool
-sim_streets = similar_streets(cmhc_base, first_ave)
+sim_streets = similar_streets(cmhc_base, montreal_rd)
 
-scaled_streets_FirstAve = scale_housing(sim_streets)
-st_write(scaled_streets_FirstAve, "./Output/first_ave_scaled.geojson")
+scaled_streets_MontrealRd = scale_housing(sim_streets)
+st_write(scaled_streets_MontrealRd, "./Output/montreal_rd_scaled.geojson")
 
-scaled_streets_FirstAve = scaled_streets_FirstAve %>%
+scaled_streets_MontrealRd = scaled_streets_MontrealRd %>%
   st_drop_geometry() %>%
   select((1:9), civic_count, surface_Parking_lots, gas_stations,
          Commercial, `Mixed-Use`, Residential, total_sites) %>%
-  mutate(case_study = "First Ave")
+  mutate(case_study = "Montreal Rd")
 
 
-write.csv(scaled_streets_FirstAve, "./Output/first_ave_scaled.csv")
+write.csv(scaled_streets_MontrealRd, "./Output/montreal_rd_scaled.csv")
 
 
 # Get number for all case studies
-All_case_studies = bind_rows(case_study_street_EliceAve, case_study_street_FirstAve, case_study_street_LancasterSt, case_study_street_MontrealRd)
+All_case_studies = bind_rows(case_study_street_elice_ave, case_study_street_first_ave, case_study_street_lancaster_st, case_study_street_montreal_rd)
 
 write.csv(All_case_studies %>% st_drop_geometry(), "./Output/All_CaseStudies.csv")
 
