@@ -44,13 +44,16 @@ This repository will help support the goals of this project in three specific wa
  - Surface parking data comprised from Open Street Map using Geofabrink
 
 #### Unit Location Data
- - The National Address Register (NAR) sets up a standardized address structure and provides a list of valid georeferenced civic addresses in Canada. The addresses are extracted from Statistics Canada's Building Register and were validated by a minimum of two independent data sources. The Unit Location Data, due to its size, is split into provincal files
+ - The National Address Register (NAR) sets up a standardized address structure and provides a list of valid georeferenced civic addresses in Canada. The addresses are extracted from Statistics Canada's Building Register and were validated by a minimum of two independent data sources. The Unit Location Data, due to its size, is split into provincal files. The unit location was used to identify low-density sites using the unit cound as well as its business use (Residential, Commercial and Mixed-Use)
+
+#### Canada Business Data
+  - The Businesses database provides the location coordinates of businesses tracked by InfoCanada. It includes company name, street address, SIC or NAICS industry code. The business data was used to idenitfy of conversion sites such as civic anchors and gas stations using the businesses 4 and 6 digit NAICS codes
  
 
 ## Tools and Methodology
 
 #### housing_data_setup.r
-This script attaches the project specific Housing Data and Surface Parking data sets to the Main Street Base Network.
+This script attaches the project specific Housing Data, Surface Parking and Business data sets to the Main Street Base Network.
 
 The housing construction data was aggregated into 3 types
   - percentage of housing built pre 1960
@@ -64,7 +67,7 @@ The housing type data was aggregated into 3 types
   
 Housing Variables were attached to main streets within 250 metres of the DA. Which was the extent of our qualitative case study boundaries
 
-Similarly the area of surface parking was aggregated and attached to all main streets within 250 metres
+Similarly the area and count of surface parking lots, as well as the count of civic anchors and gas stations was aggregated and attached to all main streets within 250 metres
 
 
 #### similar_streets
@@ -84,7 +87,7 @@ Method
 
 
 #### get_casestudy_units
-This tool takes a input list of baseline streets and the provincial data location file, and return the location and count of all units within a predefined distance of the baseline streets
+This tool takes a input list of baseline streets and the provincial data location file, and for each unique location, returns the, business use, and count of all units within a predefined distance of the baseline streets
 
 Method
 
@@ -94,20 +97,25 @@ Method
 
 3. Preform a spatial intersection between the road buffer and the location data
 
-4. Calculate the sum of units by counting the total units for a given road segment id and address
+4. Calculate the sum of units and business use for each unique address
 
 
 
 #### scale_housing
-This tool take the previously created data frame of similar streets and provides to total number of units along each road segment within 250 metres, but also provides the adjusted number based on an inputted percentage
+This tool takes the previously created data base of similar streets and provides to total number of eligible sites which is comprised of low density conversions, gas stations, surface parking lots and civic anchors along each road segment within 250 metres, 
 
 Method
 
 1. Create a for loop that iterates through each unique province within the similar street data frame
 
-2. For each province; filter the similar street road network and create a list of road segment id's, load in the location data for that province and run the case study units to get the count of units for each segment.
+2. For each province; filter the similar street road network and create a list of road segment id's, load in the location data for that province and run the get_case_study_units to get the count of units for each segment.
 
-3. Combine all roads for each province and create the adjusted total
+3. Filter the returned location data to only eligible low density conversions
+  a. Residential location under or equal to 1 unit
+  b. Commercial location under or equal to 2 units
+  c. Mixed-Use location under or equal to 3 units
+  
+4. Add the low density conversion total with the surface parking lots, gas stations and civic anchors for a total of all eligible sites along a road segment
 
 
 

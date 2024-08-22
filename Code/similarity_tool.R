@@ -323,7 +323,7 @@ st_write(units_count, "./Output/lakeshore_units.geojson")
 case_study_street = cmhc_base %>%
   subset(id %in% montreal_rd)
 case_study_street_montreal_rd = scale_housing(case_study_street)
-write.csv(case_study_street_montreal_rd %>% st_drop_geometry(), "./Output/montreal_rd_site_count.csv")
+write.csv(case_study_street_first_ave %>% st_drop_geometry(), "./Output/first_ave_site_count.csv")
 
 # scaling tool
 sim_streets = similar_streets(cmhc_base, montreal_rd)
