@@ -134,12 +134,17 @@ rm(housing_type, housing_vars, housing_year, housing)
 
 # load in the surface parking
 setwd("~/cmhc-scaling")
-surface_parking = st_read("./Data/parking_sf/canada_parking.geojson") %>%
+surface_parking = st_read("./Interim/parking_lots_clipped.geojson") %>%
   select(osm_id) %>%
   st_transform(crs = 3347)
 
-# preform an intersection with the main street network
-msn_base_parking = st_intersection(st_buffer(msn_base %>% select(id), 250), surface_parking)
+roads_buffer = st_buffer(msn_base %>% select(id), 250)
+roads_buffer = st_union(roads_buffer)
+
+
+# preform a spatial join based on nearest distance
+msn_base_parking = st_join(surface_parking, (msn_base %>% select(id)), join = st_nearest_feature)
+
 
 # get the sum of surface parking area
 msn_base_parking = msn_base_parking %>%
@@ -179,21 +184,11 @@ msn_base_final = msn_base_final %>%
 #### Processing the Gas Station Data ####
 
 # load in the national business data and filter out Gas Stations
-setwd("C:/Users/atabascio/CUI/Projects - External - Documents/819. Research & Knowledge Initiative – INFC/3 - Background Data & Research/GIS Map prototype/RKI_MainStreetMatters")
-gas_stations = st_read("./Interim/BusinessAndCivic/all")
-naics_code = read_csv("./Data/EA_Data_Export/Businesses_Canada.csv") %>%
-  select(`Unique Identifier`, `NAICS Code - 4 Digit`) %>%
-  rename("Uni_Id" = `Unique Identifier`, "NAICS_4" = `NAICS Code - 4 Digit`)
-
-gas_stations = gas_stations %>%
-  inner_join(naics_code, by = "Uni_Id")
-
-# filter out all gas stations
-gas_stations = gas_stations %>%
-  filter(NAICS_4 == 4471)
+gas_stations = st_read("./Interim/gas_stations.geojson") %>%
+  st_transform(crs = 3347)
 
 # preform an intersection with the main street network
-msn_base_gas = st_intersection(st_buffer(msn_base %>% select(id), 250), gas_stations)
+msn_base_gas = st_join(gas_stations, (msn_base %>% select(id)), join = st_nearest_feature)
 
 # get the sum of surface parking area
 msn_base_gas = msn_base_gas %>%
