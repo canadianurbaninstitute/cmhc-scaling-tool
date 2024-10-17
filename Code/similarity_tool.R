@@ -21,6 +21,7 @@ library(tidyverse)
 library(sf)
 library(proxy)
 library(units)
+library(cancensus)
 
 getwd()
 options(scipen = 999)
@@ -178,15 +179,39 @@ get_casestudy_units = function(road_network, location_data, list_of_streets){
   # readjust if the mean doesn't equal a whole number to mixed use
   address_summary = address_summary %>%
     mutate(bu_use = (case_when(
+      # residential
       bu_use == 1.0 ~ 1.0,
+      # partial residential
       bu_use == 2.0 ~ 2.0,
+      # non-residential
       bu_use == 3.0 ~ 3.0,
-      TRUE ~ 3.0
+      # partial residential
+      TRUE ~ 2.0
     )))
   
   
+  # create a final check where any mixed-use building off the main street is converted to a
+  # residential property type
+  street_buffer = st_buffer(initial_roads %>% select(), 75)
+  street_buffer = street_buffer %>%
+    mutate(on_street = "yes")
+  
+  # preform a spatial join between the locations and the street buffer
+  main_street_addresses = st_join(address_summary, street_buffer, join = st_intersects, left = TRUE)
+  
+  # use case_when to convert all partial residential building off the main street to purely residential
+  main_street_addresses = main_street_addresses %>%
+    mutate(bu_use = case_when(
+      bu_use == 2 & is.na(on_street) ~ 1,
+      TRUE ~ bu_use
+    ))
+  
+  main_street_addresses = main_street_addresses %>%
+    select(-on_street) %>%
+    distinct(Address, .keep_all = TRUE)
+  
   # return the address points
-  return(address_summary)
+  return(main_street_addresses)
   
 }
 
@@ -225,9 +250,9 @@ scale_housing = function(similarity_network){
         # SDH
         bu_use == 1 & units <= 1 ~ "Residential",
         # Commercial
-        bu_use == 2 & units <= 2 ~ "Commercial",
+        bu_use == 2 & units <= 2 ~ "Mixed-Use",
         # Mixed Use
-        bu_use == 3 & units <= 3 ~ "Mixed-Use",
+        bu_use == 3 & units <= 3 ~ "Commercial",
         TRUE ~ "Not-Eligible"
       ))
     
@@ -276,7 +301,7 @@ scale_housing = function(similarity_network){
                                         Commercial, `Mixed-Use`, Residential))))
   
   
-  columns = c("civic_count", "surface_Parking_lots", "gas_stations", "Commercial",
+  columns = c("civic_count", "surface_Parking_lots", "surface_Parking_area", "gas_stations", "Commercial",
               "Mixed-Use", "Residential", "total_sites")
   
   
@@ -298,7 +323,7 @@ setwd("~/cmhc-scaling")
 cmhc_base = st_read("./Interim/cmhc_ms_base.geojson") %>%
   st_transform(crs = 3347)
 
-unit_data = read_csv("./Data/address_data/joined_addresses_35.csv")
+unit_data = read_csv("./Data/address_data/joined_addresses_48.csv")
 
 
 
@@ -311,40 +336,46 @@ lancaster_st = c("197566")
 
 first_ave = c("31757")
 
-lakeshore = c("190920")
+cannon_hamilton = c("195949")
 
 
 
 # unit count for case studies
-units_count = get_casestudy_units(cmhc_base, unit_data, lakeshore)
-st_write(units_count, "./Output/lakeshore_units.geojson")
+units_count = get_casestudy_units(cmhc_base, unit_data, first_ave)
+st_write(units_count, "./Output/first_ave_units.geojson")
 
 # site count for case study
 case_study_street = cmhc_base %>%
-  subset(id %in% montreal_rd)
-case_study_street_montreal_rd = scale_housing(case_study_street)
+  subset(id %in% first_ave)
+case_study_street_first_ave = scale_housing(case_study_street)
 write.csv(case_study_street_first_ave %>% st_drop_geometry(), "./Output/first_ave_site_count.csv")
 
 # scaling tool
-sim_streets = similar_streets(cmhc_base, montreal_rd)
+sim_streets = similar_streets(cmhc_base, first_ave)
 
-scaled_streets_MontrealRd = scale_housing(sim_streets)
-st_write(scaled_streets_MontrealRd, "./Output/montreal_rd_scaled.geojson")
+scaled_streets_FirstAve = scale_housing(sim_streets)
+st_write(scaled_streets_FirstAve, "./Output/first_ave_scaled.geojson")
 
-scaled_streets_MontrealRd = scaled_streets_MontrealRd %>%
+scaled_streets_FirstAve = scaled_streets_FirstAve %>%
   st_drop_geometry() %>%
   select((1:9), civic_count, surface_Parking_lots, gas_stations,
          Commercial, `Mixed-Use`, Residential, total_sites) %>%
-  mutate(case_study = "Montreal Rd")
+  mutate(case_study = "First Ave")
 
 
-write.csv(scaled_streets_MontrealRd, "./Output/montreal_rd_scaled.csv")
+write.csv(scaled_streets_FirstAve, "./Output/first_ave_scaled.csv")
+
+
+
+scaled_streets_MontrealRd = st_read("./Output/MontrealRd/montreal_rd_scaled.geojson")
+
+
 
 
 # Get number for all case studies
 All_case_studies = bind_rows(case_study_street_elice_ave, case_study_street_first_ave, case_study_street_lancaster_st, case_study_street_montreal_rd)
 
-write.csv(All_case_studies %>% st_drop_geometry(), "./Output/All_CaseStudies.csv")
+write.csv(All_case_studies, "./Output/All_CaseStudies.csv")
 
 
 # Get numbers for all similar streets
@@ -354,3 +385,50 @@ All_sim_streets = All_sim_streets %>%
   distinct(id, .keep_all = TRUE)
 
 write.csv(All_sim_streets %>% st_drop_geometry(), "./Output/All_SimStreets.csv")
+
+
+
+
+
+# stats by city size
+
+# add the population to for each CSD
+options(cancensus.api_key = "CensusMapper_3326bf59a08fe00964d27dc30aa685ec")
+
+CSDs_pop = get_census(dataset = 'CA21', regions = list(C = "01"),
+                      vectors = c(),
+                      level = 'CSD', use_cache = FALSE, geo_format = NA)
+
+CSDs_join = CSDs %>%
+  select(CSDUID, CSDNAME) %>%
+  left_join(CSDs_pop %>% select(GeoUID, Population), by = c("CSDUID" = "GeoUID"))
+
+All_sim_streets = st_intersection(All_sim_streets, st_buffer(CSDs_join, -500))
+
+# remove the CSDUID and add the rural binary based on population
+All_sim_streets = All_sim_streets %>%
+  mutate(City_Size = case_when(
+    Population < 250000 ~ "Small",
+    Population >= 250000 & Population <1000000 ~ "Medium",
+    Population >= 1000000 ~ "Large"
+  ))
+
+sim_streets_summary = All_sim_streets %>%
+  st_drop_geometry() %>%
+  group_by(City_Size) %>%
+  summarise(Not.Eligible = sum(Not.Eligible),
+            civic_count = sum(civic_count),
+            surface_Parking_lots = sum(surface_Parking_lots),
+            surface_Parking_area = sum(surface_Parking_area),
+            gas_stations = sum(gas_stations),
+            Residential = sum(Residential),
+            Commercial = sum(Commercial),
+            Mixed.Use = sum(Mixed.Use),
+            total_sites = sum(total_sites))
+  
+
+write.csv(sim_streets_summary, "./Output/street_city_summary.csv")
+
+
+
+
