@@ -112,8 +112,8 @@ Method
 
 3. Filter the returned location data to only eligible low density conversions
   a. Residential location under or equal to 1 unit
-  b. Commercial location under or equal to 2 units
-  c. Mixed-Use location under or equal to 3 units
+  b. Mixed-Use location under or equal to 2 units
+  c. Commercial location under or equal to 3 units
   
 4. Add the low density conversion total with the surface parking lots, gas stations and civic anchors for a total of all eligible sites along a road segment
 
